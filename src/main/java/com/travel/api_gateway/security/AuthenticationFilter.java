@@ -13,6 +13,8 @@ import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
+import org.springframework.http.HttpMethod;
+
 
 import java.nio.charset.StandardCharsets;
 import java.security.Key;
@@ -28,7 +30,12 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
             "/api/users/register",
             "/api/users/login",
             "/api/posts/feeds",
-            "/api/posts/search"
+            "/api/posts/search",
+            "/api/road/cities",
+            "/api/road/build",
+            "/api/users/forgot-password",
+            "/api/users/reset-password"
+
     );
 
     @Override
@@ -36,10 +43,50 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
 
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getURI().getPath();
+        HttpMethod method = request.getMethod();
+
+        if (method == HttpMethod.OPTIONS) {
+            return chain.filter(exchange);
+        }
 
         if (isOpenEndpoint(path)) {
             return chain.filter(exchange);
         }
+        if (method == HttpMethod.GET && path.matches("^/api/posts/\\d+$")) {
+
+            String authHeader = request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+
+            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                return chain.filter(exchange);
+            }
+
+            try {
+                String token = authHeader.substring(7);
+                Key key = Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
+                Claims claims = Jwts.parserBuilder()
+                        .setSigningKey(key)
+                        .build()
+                        .parseClaimsJws(token)
+                        .getBody();
+
+                String userId = claims.get("userId").toString();
+
+                ServerHttpRequest modifiedRequest = request.mutate()
+                        .header("X-User-Id", userId)
+                        .build();
+
+                ServerWebExchange modifiedExchange = exchange.mutate()
+                        .request(modifiedRequest)
+                        .build();
+
+                return chain.filter(modifiedExchange);
+
+            } catch (Exception e) {
+                return chain.filter(exchange);
+            }
+        }
+
+
 
         String authHeader = request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
 
